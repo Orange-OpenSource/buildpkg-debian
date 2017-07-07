@@ -1,4 +1,4 @@
-FROM debian:latest
+FROM debian:jessie
 MAINTAINER Michel Decima <michel.decima@orange.com>
 
 RUN apt-get update \
