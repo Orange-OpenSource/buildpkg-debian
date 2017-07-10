@@ -12,3 +12,10 @@ RUN apt-get update \
 	curl gnupg \
     && apt-get clean
 
+COPY apt-add-gitlab /usr/bin/
+RUN apt-add-gitlab orange-opensource/gitlab-buildpkg-tools \
+    && apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -yq gitlab-buildpkg-tools \
+    && apt-get clean \
+    || true
+
