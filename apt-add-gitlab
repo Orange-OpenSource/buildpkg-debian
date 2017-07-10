@@ -1,0 +1,107 @@
+#!/bin/bash
+# 
+#  Copyright (c) 2017 Orange
+#  
+#  Authors:
+#    Christian Bayle <christian.bayle@orange.com>
+#    Michel Decima <michel.decima@orange.com>
+#  
+#  This program is free software; you can redistribute it and/or modify it
+#  under the terms of the GNU General Public License version 2 as published 
+#  by the Free Software Foundation.
+# 
+
+PPA_HOST="gitlab.io"
+
+die() {
+    echo "$(basename $0): $@" >&2 ; exit 1
+}
+
+# RELEASE_DIST is a lower-case synonym for the distributor id, like debian
+# RELEASE_NAME is short codename version in lower case, like stretch
+#
+# Examples:
+#   Debian GNU/Linux 8.7 (jessie)                       -> debian/jessie
+#   Ubuntu 16.04.2 LTS                                  -> ubuntu/xenial
+# 
+case $(lsb_release -i | cut -f2) in
+    LinuxMint)      RELEASE_DIST="mint" ;;
+    Debian)         RELEASE_DIST="debian" ;;
+    Ubuntu)         RELEASE_DIST="ubuntu" ;;
+    *)              RELEASE_DIST="unknown" ;;
+esac
+RELEASE_NAME=$(lsb_release -c | cut -f2 | tr '[A-Z]' '[a-z]')
+
+
+#############################################################################
+
+ppa_apt_print() {               # project_namespace project_name
+    local ppa_url="http://$1.$PPA_HOST/$2"
+    cat << EOF
+deb [arch=amd64] $ppa_url/$RELEASE_DIST $RELEASE_NAME main
+# deb-src $ppa_url/$RELEASE_DIST $RELEASE_NAME main
+EOF
+}       
+
+ppa_apt_install() {                 # project_namespace project_name
+    local source_list="/etc/apt/sources.list.d/gitlab-$1-$2.list"
+    local key_url="http://$1.$PPA_HOST/$2/GPG_PUBLIC_KEY"
+    curl --silent $key_url | apt-key add - \
+        || die "install key failed: $key_url"
+    ppa_apt_print $@ | tee $source_list \
+        || die "install source.list failed: $source_list"
+}
+
+ppa_apt_remove() {                  # project_namespace project_name
+    local source_list="/etc/apt/sources.list.d/gitlab-$1-$2.list"
+    rm -v $source_list
+}
+
+ppa_apt_help() {
+    cat << EOF
+Usage: $(basename $0) [OPTION]... PROJECT [PROJECT]...
+
+Examples:
+     apt-add-gitlab Orange-OpenSource/gitlab-buildpkg-tools
+     apt-add-gitlab --remove Orange-OpenSource/gitlab-buildpkg-tools
+
+EOF
+}
+
+
+#############################################################################
+
+
+ARGPARSER=$(getopt \
+    -o rH: \
+    --long help,remove,host: \
+    -n $(basename $0) -- "$@")
+if [ $? != 0 ] ; then die "getopt failed" ; fi
+eval set -- "$ARGPARSER"
+while true ; do
+    case "$1" in
+        --help)         ppa_apt_help ; exit 0 ;;
+        --remove)       REMOVE=yes ; shift ;;
+        -H|--host)      PPA_HOST=$2 ; shift 2 ;;
+        --)             shift ; break ;;
+        *)              die "Internal error!" ;;
+    esac
+done
+
+for project in $@ ; do
+    project_namespace=$(cut -d/ -f1 <<< "$project")
+    project_name=$(cut -d/ -f2 <<< "$project")
+    if [ "$project" != "$project_namespace/$project_name" ] ; then
+        die "bad argument: $project"
+    fi
+    if [ "$REMOVE" = "yes" ] ; then
+        (( EUID == 0 )) || die "not root"
+        ppa_apt_remove $project_namespace $project_name \
+            || die "remove failed: $project"
+    else
+        (( EUID == 0 )) || die "not root"
+        ppa_apt_install $project_namespace $project_name \
+            || die "install failed: $project"
+    fi     
+done
+
