@@ -16,6 +16,5 @@ COPY apt-add-gitlab /usr/bin/
 RUN apt-add-gitlab orange-opensource/gitlab-buildpkg-tools \
     && apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -yq gitlab-buildpkg-tools \
-    && apt-get clean \
-    || true
+    && apt-get clean 
 
