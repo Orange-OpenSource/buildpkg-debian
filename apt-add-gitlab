@@ -46,7 +46,7 @@ EOF
 ppa_apt_install() {                 # project_namespace project_name
     local source_list="/etc/apt/sources.list.d/gitlab-$1-$2.list"
     local key_url="http://$1.$PPA_HOST/$2/GPG_PUBLIC_KEY"
-    curl --silent $key_url | apt-key add - \
+    curl --silent -L $key_url | apt-key add - \
         || die "install key failed: $key_url"
     ppa_apt_print $@ | tee $source_list \
         || die "install source.list failed: $source_list"
