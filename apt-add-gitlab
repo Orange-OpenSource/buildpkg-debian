@@ -11,7 +11,7 @@
 #  by the Free Software Foundation.
 # 
 
-PPA_HOST="gitlab.io"
+PAGES_HOST=${PAGES_HOST:-gitlab.io}
 
 die() {
     echo "$(basename $0): $@" >&2 ; exit 1
@@ -35,35 +35,39 @@ RELEASE_NAME=$(lsb_release -c | cut -f2 | tr '[A-Z]' '[a-z]')
 
 #############################################################################
 
-ppa_apt_print() {               # project_namespace project_name
-    local ppa_url="http://$1.$PPA_HOST/$2"
+ppa_apt_print() {                   # ppa_url
+    local ppa_url="$1"
     cat << EOF
 deb [arch=amd64] $ppa_url/$RELEASE_DIST $RELEASE_NAME main
 # deb-src $ppa_url/$RELEASE_DIST $RELEASE_NAME main
 EOF
 }       
 
-ppa_apt_install() {                 # project_namespace project_name
-    local source_list="/etc/apt/sources.list.d/gitlab-$1-$2.list"
-    local key_url="http://$1.$PPA_HOST/$2/GPG_PUBLIC_KEY"
+ppa_apt_install() {                 # ppa_slug ppa_url
+    local source_list="/etc/apt/sources.list.d/gitlab-$1.list"
+    local key_url="$2/GPG_PUBLIC_KEY"
     curl --silent -L $key_url | apt-key add - \
         || die "install key failed: $key_url"
-    ppa_apt_print $@ | tee $source_list \
+    ppa_apt_print $2 | tee $source_list \
         || die "install source.list failed: $source_list"
 }
 
-ppa_apt_remove() {                  # project_namespace project_name
-    local source_list="/etc/apt/sources.list.d/gitlab-$1-$2.list"
+ppa_apt_remove() {                  # ppa_slug ppa_url
+    local source_list="/etc/apt/sources.list.d/gitlab-$1.list"
     rm -v $source_list
 }
 
 ppa_apt_help() {
     cat << EOF
-Usage: $(basename $0) [OPTION]... PROJECT [PROJECT]...
+Usage: $(basename $0) [OPTION]... [PROJECT_NICKNAME|PPA_URL]...
+
+Argument be a project nickname (namespace/group) or a PPA URL.
+If an URL is given, option -h|--host is ignored.
 
 Examples:
-     apt-add-gitlab Orange-OpenSource/gitlab-buildpkg-tools
-     apt-add-gitlab --remove Orange-OpenSource/gitlab-buildpkg-tools
+     $(basename $0) Orange-OpenSource/gitlab-buildpkg-tools
+     $(basename $0) http://orange-opensource.example.com/gitlab-buildpkg-tools
+     $(basename $0) --remove Orange-OpenSource/gitlab-buildpkg-tools
 
 EOF
 }
@@ -82,26 +86,38 @@ while true ; do
     case "$1" in
         --help)         ppa_apt_help ; exit 0 ;;
         --remove)       REMOVE=yes ; shift ;;
-        -H|--host)      PPA_HOST=$2 ; shift 2 ;;
+        -H|--host)      PAGES_HOST=$2 ; shift 2 ;;
         --)             shift ; break ;;
         *)              die "Internal error!" ;;
     esac
 done
 
-for project in $@ ; do
-    project_namespace=$(cut -d/ -f1 <<< "$project")
-    project_name=$(cut -d/ -f2 <<< "$project")
-    if [ "$project" != "$project_namespace/$project_name" ] ; then
-        die "bad argument: $project"
-    fi
+for arg in "$@" ; do
+    case "$arg" in
+        http://*|https://*)
+            path=$(sed -e 's|https\?://||' -e 's|/*$||' <<< "$arg")
+            project_namespace=$(cut -d. -f1 <<< "$path")
+            project_name=$(cut -d/ -f2- <<< "$path")
+            ppa_url="$arg"
+            ;;
+        *)
+            project_namespace=$(cut -d/ -f1 <<< "$arg")
+            project_name=$(cut -d/ -f2- <<< "$arg")
+            if [ "$arg" != "$project_namespace/$project_name" ] ; then
+                die "bad argument: $arg"
+            fi
+            ppa_url="http://$project_namespace.$PAGES_HOST/$project_name"
+            ;;
+    esac
+    ppa_url=$(sed -e 's|/*$||' <<< "$ppa_url")
+    ppa_slug=$(tr '/[:upper:]' '-[:lower:]' <<< "$project_namespace/$project_name")
+
     if [ "$REMOVE" = "yes" ] ; then
         (( EUID == 0 )) || die "not root"
-        ppa_apt_remove $project_namespace $project_name \
-            || die "remove failed: $project"
+        ppa_apt_remove $ppa_slug $ppa_url || die "remove failed: $arg"
     else
         (( EUID == 0 )) || die "not root"
-        ppa_apt_install $project_namespace $project_name \
-            || die "install failed: $project"
+        ppa_apt_install $ppa_slug $ppa_url || die "install failed: $arg"
     fi     
 done
 
